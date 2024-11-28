@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Detección de Objetos Estilo FC Barcelona</title>
+    <style>
+        :root {
+            --blaugrana-dark: #004d98;   /* Azul profundo */
+            --blaugrana-light: #a50044;  /* Rojo intenso */
+            --blaugrana-gradient: linear-gradient(135deg, #004d98, #a50044);
+        }
+        body {
+            font-family: 'Arial', sans-serif;
+            background: var(--blaugrana-gradient);
+            color: white;
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        .container {
+            background-color: rgba(255,255,255,0.1);
+            border-radius: 15px;
+            padding: 20px;
+            width: 100%;
+            max-width: 600px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            position: relative;
+        }
+        #camera-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: var(--blaugrana-gradient);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            text-align: center;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        #camera-overlay button {
+            background-color: white;
+            color: var(--blaugrana-dark);
+            border: none;
+            padding: 15px 30px;
+            margin: 10px;
+            border-radius: 25px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        #camera-overlay button:hover {
+            transform: scale(1.05);
+            background-color: var(--blaugrana-light);
+            color: white;
+        }
+        #webcam, #detection-canvas {
+            max-width: 100%;
+            border-radius: 10px;
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+        .detection-info {
+            background-color: rgba(0,0,0,0.7);
+            padding: 10px;
+            border-radius: 10px;
+            margin-top: 10px;
+            position: relative;
+            z-index: 10;
+        }
+    </style>
+</head>
+<body>
+    <div id="camera-overlay">
+        <h1>Detección de Objetos</h1>
+        <p>Permite el acceso a la cámara para iniciar la detección</p>
+        <button id="force-camera-access">Activar Cámara</button>
+    </div>
+
+    <div class="container" style="display:none;">
+        <video id="webcam" autoplay playsinline></video>
+        <canvas id="detection-canvas"></canvas>
+        <div class="detection-info" id="object-list"></div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.11.0/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.0/dist/coco-ssd.min.js"></script>
+    <script>
+        // Diccionario de traducciones de objetos
+        const translations = {
+            'person': 'persona',
+            'bicycle': 'bicicleta',
+            'car': 'coche',
+            'motorcycle': 'motocicleta',
+            'airplane': 'avión',
+            'bus': 'autobús',
+            'train': 'tren',
+            'truck': 'camión',
+            'boat': 'barco',
+            'traffic light': 'semáforo',
+            'fire hydrant': 'hidrante',
+            'stop sign': 'señal de stop',
+            'parking meter': 'parquímetro',
+            'bench': 'banco',
+            'bird': 'pájaro',
+            'cat': 'gato',
+            'dog': 'perro',
+            'horse': 'caballo',
+            'sheep': 'oveja',
+            'cow': 'vaca',
+            'elephant': 'elefante',
+            'bear': 'oso',
+            'zebra': 'cebra',
+            'giraffe': 'jirafa',
+            'backpack': 'mochila',
+            'umbrella': 'paraguas',
+            'handbag': 'bolso',
+            'tie': 'corbata',
+            'suitcase': 'maleta',
+            'frisbee': 'frisbee',
+            'skis': 'esquís',
+            'snowboard': 'tabla de snowboard',
+            'sports ball': 'pelota deportiva',
+            'kite': 'cometa',
+            'baseball bat': 'bate de béisbol',
+            'baseball glove': 'guante de béisbol',
+            'skateboard': 'monopatín',
+            'surfboard': 'tabla de surf',
+            'tennis racket': 'raqueta de tenis',
+            'bottle': 'botella',
+            'wine glass': 'copa de vino',
+            'cup': 'taza',
+            'fork': 'tenedor',
+            'knife': 'cuchillo',
+            'spoon': 'cuchara',
+            'bowl': 'tazón',
+            'banana': 'plátano',
+            'apple': 'manzana',
+            'sandwich': 'sándwich',
+            'orange': 'naranja',
+            'broccoli': 'brócoli',
+            'carrot': 'zanahoria',
+            'hot dog': 'perrito caliente',
+            'pizza': 'pizza',
+            'donut': 'donut',
+            'cake': 'pastel',
+            'chair': 'silla',
+            'couch': 'sofá',
+            'potted plant': 'planta en maceta',
+            'bed': 'cama',
+            'dining table': 'mesa de comedor',
+            'toilet': 'inodoro',
+            'tv': 'televisión',
+            'laptop': 'portátil',
+            'mouse': 'ratón',
+            'remote': 'control remoto',
+            'keyboard': 'teclado',
+            'cell phone': 'teléfono móvil',
+            'microwave': 'microondas',
+            'oven': 'horno',
+            'toaster': 'tostadora',
+            'sink': 'lavabo',
+            'refrigerator': 'refrigerador',
+            'book': 'libro',
+            'clock': 'reloj',
+            'vase': 'jarrón',
+            'scissors': 'tijeras',
+            'teddy bear': 'oso de peluche',
+            'hair drier': 'secador de pelo',
+            'toothbrush': 'cepillo de dientes'
+        };
+
+        class BlaugranaDetection {
+            constructor() {
+                this.cameraOverlay = document.getElementById('camera-overlay');
+                this.container = document.querySelector('.container');
+                this.webcam = document.getElementById('webcam');
+                this.canvas = document.getElementById('detection-canvas');
+                this.ctx = this.canvas.getContext('2d');
+                this.objectList = document.getElementById('object-list');
+                this.detectedObjects = new Set(); 
+                
+                this.forceCameraButton = document.getElementById('force-camera-access');
+                this.forceCameraButton.addEventListener('click', () => this.initCamera());
+            }
+
+            async initCamera() {
+                try {
+                    const constraints = [
+                        { video: { facingMode: 'environment' } },
+                        { video: { facingMode: 'user' } },
+                        { video: true }
+                    ];
+
+                    let stream = null;
+                    for (let constraint of constraints) {
+                        try {
+                            stream = await navigator.mediaDevices.getUserMedia(constraint);
+                            if (stream) break;
+                        } catch (error) {
+                            console.warn('Método de cámara fallido:', error);
+                        }
+                    }
+
+                    if (!stream) {
+                        throw new Error('No se pudo acceder a ninguna cámara');
+                    }
+
+                    this.webcam.srcObject = stream;
+                    this.webcam.addEventListener('loadedmetadata', () => {
+                        this.setupDetection();
+                    });
+
+                    this.cameraOverlay.style.display = 'none';
+                    this.container.style.display = 'block';
+
+                } catch (error) {
+                    alert('Error al acceder a la cámara: ' + error.message);
+                }
+            }
+
+            async setupDetection() {
+                try {
+                    this.canvas.width = this.webcam.videoWidth;
+                    this.canvas.height = this.webcam.videoHeight;
+
+                    const model = await cocoSsd.load();
+                    this.startDetection(model);
+                } catch (error) {
+                    console.error('Error en configuración:', error);
+                }
+            }
+
+            startDetection(model) {
+                const detectObjects = async () => {
+                    this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+
+                    const predictions = await model.detect(this.webcam);
+                    this.updateObjectList(predictions);
+
+                    predictions.forEach(prediction => {
+                        const [x, y, width, height] = prediction.bbox;
+                        
+                        // Dibujar rectángulo rojo preciso
+                        this.ctx.strokeStyle = 'rgb(255,0,0)';
+                        this.ctx.lineWidth = 3;
+                        this.ctx.strokeRect(x, y, width, height);
+
+                        // Texto con traducción
+                        const translatedClass = translations[prediction.class] || prediction.class;
+                        this.ctx.fillStyle = 'white';
+                        this.ctx.font = '16px Arial';
+                        this.ctx.fillText(
+                            `${translatedClass} (${(prediction.score * 100).toFixed(2)}%)`, 
+                            x, 
+                            y > 20 ? y - 5 : y + 15
+                        );
+                    });
+
+                    requestAnimationFrame(detectObjects);
+                };
+
+                detectObjects();
+            }
+
+            updateObjectList(predictions) {
+                // Añadir objetos nuevos al conjunto
+                predictions.forEach(prediction => {
+                    // Usar traducción si está disponible
+                    const translatedClass = translations[prediction.class] || prediction.class;
+                    this.detectedObjects.add(translatedClass);
+                });
+                
+                // Convertir conjunto a lista
+                const uniqueObjectsList = Array.from(this.detectedObjects);
+                
+                // Actualizar lista de objetos con numeración
+                this.objectList.innerHTML = uniqueObjectsList.map((obj, index) => 
+                    `<div>${index + 1}. 🔍 ${obj}</div>`
+                ).join('');
+            }
+        }
+
+        // Iniciar aplicación
+        document.addEventListener('DOMContentLoaded', () => {
+            new BlaugranaDetection();
+        });
+    </script>
+</body>
+</html>
