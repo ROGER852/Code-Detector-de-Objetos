@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Detección de Objetos Estilo FC Barcelona</title>
+    <style>
+        :root {
+            --blaugrana-dark: #004d98;   /* Azul profundo */
+            --blaugrana-light: #a50044;  /* Rojo intenso */
+            --blaugrana-gradient: linear-gradient(135deg, #004d98, #a50044);
+        }
+        body {
+            font-family: 'Arial', sans-serif;
+            background: var(--blaugrana-gradient);
+            color: white;
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        .container {
+            background-color: rgba(255,255,255,0.1);
+            border-radius: 15px;
+            padding: 20px;
+            width: 100%;
+            max-width: 600px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+        #camera-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: var(--blaugrana-gradient);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            text-align: center;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        #camera-overlay button {
+            background-color: white;
+            color: var(--blaugrana-dark);
+            border: none;
+            padding: 15px 30px;
+            margin: 10px;
+            border-radius: 25px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        #camera-overlay button:hover {
+            transform: scale(1.05);
+            background-color: var(--blaugrana-light);
+            color: white;
+        }
+        #webcam, #detection-canvas {
+            max-width: 100%;
+            border-radius: 10px;
+        }
+        .detection-info {
+            background-color: rgba(0,0,0,0.7);
+            padding: 10px;
+            border-radius: 10px;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div id="camera-overlay">
+        <h1>Detección de Objetos FC Barcelona</h1>
+        <p>Permite el acceso a la cámara para iniciar la detección</p>
+        <button id="force-camera-access">Activar Cámara</button>
+    </div>
+
+    <div class="container" style="display:none;">
+        <video id="webcam" autoplay playsinline></video>
+        <canvas id="detection-canvas"></canvas>
+        <div class="detection-info" id="object-list"></div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.11.0/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.0/dist/coco-ssd.min.js"></script>
+    <script>
+        class BlaugranaDetection {
+            constructor() {
+                this.cameraOverlay = document.getElementById('camera-overlay');
+                this.container = document.querySelector('.container');
+                this.webcam = document.getElementById('webcam');
+                this.canvas = document.getElementById('detection-canvas');
+                this.ctx = this.canvas.getContext('2d');
+                this.objectList = document.getElementById('object-list');
+                
+                this.forceCameraButton = document.getElementById('force-camera-access');
+                this.forceCameraButton.addEventListener('click', () => this.initCamera());
+            }
+
+            async initCamera() {
+                try {
+                    // Forzar solicitud de cámara con múltiples estrategias
+                    const constraints = [
+                        { video: { facingMode: 'environment' } },
+                        { video: { facingMode: 'user' } },
+                        { video: true }
+                    ];
+
+                    let stream = null;
+                    for (let constraint of constraints) {
+                        try {
+                            stream = await navigator.mediaDevices.getUserMedia(constraint);
+                            if (stream) break;
+                        } catch (error) {
+                            console.warn('Método de cámara fallido:', error);
+                        }
+                    }
+
+                    if (!stream) {
+                        throw new Error('No se pudo acceder a ninguna cámara');
+                    }
+
+                    // Configurar video
+                    this.webcam.srcObject = stream;
+                    this.webcam.addEventListener('loadedmetadata', () => {
+                        this.setupDetection();
+                    });
+
+                    // Transición de interfaz
+                    this.cameraOverlay.style.display = 'none';
+                    this.container.style.display = 'block';
+
+                } catch (error) {
+                    alert('Error al acceder a la cámara: ' + error.message);
+                }
+            }
+
+            async setupDetection() {
+                try {
+                    // Configurar dimensiones del canvas
+                    this.canvas.width = this.webcam.videoWidth;
+                    this.canvas.height = this.webcam.videoHeight;
+
+                    // Cargar modelo de detección
+                    const model = await cocoSsd.load();
+                    this.startDetection(model);
+                } catch (error) {
+                    console.error('Error en configuración:', error);
+                }
+            }
+
+            startDetection(model) {
+                const detectObjects = async () => {
+                    // Limpiar canvas
+                    this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+
+                    // Realizar detección
+                    const predictions = await model.detect(this.webcam);
+                    this.updateObjectList(predictions);
+
+                    // Dibujar predicciones
+                    predictions.forEach(prediction => {
+                        const [x, y, width, height] = prediction.bbox;
+                        
+                        // Dibujar rectángulo
+                        this.ctx.strokeStyle = 'rgb(255,0,0)';
+                        this.ctx.lineWidth = 3;
+                        this.ctx.strokeRect(x, y, width, height);
+
+                        // Añadir texto
+                        this.ctx.fillStyle = 'white';
+                        this.ctx.font = '16px Arial';
+                        this.ctx.fillText(
+                            `${prediction.class} (${(prediction.score * 100).toFixed(2)}%)`, 
+                            x, 
+                            y > 20 ? y - 5 : y + 15
+                        );
+                    });
+
+                    // Continuar detección
+                    requestAnimationFrame(detectObjects);
+                };
+
+                detectObjects();
+            }
+
+            updateObjectList(predictions) {
+                // Mantener solo objetos únicos
+                const uniqueObjects = [...new Set(predictions.map(p => p.class))];
+                
+                this.objectList.innerHTML = uniqueObjects.map(obj => 
+                    `<div>🔍 ${obj}</div>`
+                ).join('');
+            }
+        }
+
+        // Iniciar aplicación
+        document.addEventListener('DOMContentLoaded', () => {
+            new BlaugranaDetection();
+        });
+    </script>
+</body>
+</html>
